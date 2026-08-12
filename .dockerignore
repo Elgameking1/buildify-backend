@@ -1,0 +1,34 @@
+# Everything here is either regenerated inside the image or has no business in
+# it.  Without this file the build context includes .venv/ - roughly 155 MB of
+# host-platform binaries that the image would never use and pip would overwrite
+# anyway - and every build pays to upload it.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Secrets must never enter an image layer: anyone who can pull it can read them,
+# and deleting the file in a later layer does not remove it from the history.
+.env
+.env.*
+!.env.example
+
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+
+# Local-development and documentation files. The Dockerfile copies app/,
+# alembic/, tests/ and pyproject.toml explicitly, so nothing below is needed to
+# build or run the service.
+docker-compose.yml
+Makefile
+README.md
+docker/
+scripts/

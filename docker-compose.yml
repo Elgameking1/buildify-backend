@@ -1,0 +1,62 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-marketplace}
+      MYSQL_USER: ${MYSQL_USER:-marketplace}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-marketplace}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # Default is 3, which would make "cem" unsearchable.  Lowering it makes
+      # short material names findable; the app still falls back to LIKE below
+      # this threshold.
+      - --innodb-ft-min-token-size=2
+    ports:
+      # 3307 on the host so a MySQL already installed locally is not disturbed.
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Creates the separate marketplace_test schema on first boot.
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live reload during development.
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+      - ./tests:/app/tests
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    depends_on:
+      - mysql
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: mysql
+
+volumes:
+  mysql_data:

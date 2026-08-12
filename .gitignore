@@ -1,0 +1,20 @@
+.env
+.venv/
+venv/
+
+# Database TLS material. The Aiven CA is a public certificate rather than a
+# secret, but keeping it untracked stops anyone reading the repo from assuming
+# it is a credential - and stops a private key ever landing here by habit.
+certs/
+*.pem
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.DS_Store
+.idea/
+.vscode/
