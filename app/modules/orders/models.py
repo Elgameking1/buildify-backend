@@ -1,8 +1,10 @@
 """Cart and order tables.
 
-There is no payment model here, by design: the proposal excludes online payment
-integration.  An order is a confirmed request to a vendor; settlement happens
-offline.
+Payment lives in its own module (`app.modules.payments`) rather than as columns
+here.  One order can carry several attempts - an abandoned checkout followed by
+a successful retry - so it is a separate table with its own history, and
+`Order.status` stays what `_roll_up_status` derives from the vendor lines rather
+than becoming a second, conflicting record of whether money arrived.
 """
 
 from datetime import datetime
@@ -29,6 +31,7 @@ from app.db.base import Base, PKMixin, TimestampMixin, utc_now
 
 if TYPE_CHECKING:
     from app.modules.catalog.models import Product
+    from app.modules.payments.models import Payment
     from app.modules.users.models import User
 
 
@@ -96,6 +99,16 @@ class Order(PKMixin, TimestampMixin, Base):
     client: Mapped["User"] = relationship()
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order", cascade="all, delete-orphan", lazy="selectin"
+    )
+    # selectin, like items: every order is serialised with its payment state,
+    # and a lazy load would fire IO from attribute access during serialisation,
+    # which raises MissingGreenlet under asyncio.
+    payments: Mapped[list["Payment"]] = relationship(  # noqa: F821
+        "Payment",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="Payment.id",
     )
 
 

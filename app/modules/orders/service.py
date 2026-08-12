@@ -11,9 +11,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.enums import (
     NotificationType,
     OrderStatus,
+    PaymentStatus,
     ProductStatus,
     UserRole,
     VendorItemStatus,
@@ -25,6 +27,7 @@ from app.modules.catalog.models import Product
 from app.modules.notifications import service as notifications
 from app.modules.orders.models import Cart, CartItem, Order, OrderItem
 from app.modules.orders.schemas import CartItemCreate, CartItemUpdate, OrderCreate
+from app.modules.payments.models import Payment
 from app.modules.users.models import User
 
 # What a vendor may do to one of their order lines.
@@ -256,14 +259,25 @@ async def checkout(db: AsyncSession, client: User, payload: OrderCreate) -> Orde
     for item in list(cart.items):
         await db.delete(item)
 
-    for vendor_id in vendor_ids:
-        await notifications.notify(
-            db,
-            user_id=vendor_id,
-            type=NotificationType.ORDER_PLACED,
-            message=f"New order {order.order_number} from {client.full_name}.",
-            payload={"order_id": order.id, "order_number": order.order_number},
-        )
+    # Vendors hear about the order only once it is real to them.
+    #
+    # With online payment on, an unpaid order is an intention, not a
+    # commitment - the buyer may abandon Paystack's page and never come back.
+    # Telling vendors at this point would fill their queue with orders that
+    # never get paid, so the announcement is deferred to payment success,
+    # which `payments.service._notify_success` raises.
+    #
+    # With payment off, settlement is arranged offline and placing the order
+    # *is* the commitment, so the notification belongs here as before.
+    if not settings.payments_enabled:
+        for vendor_id in vendor_ids:
+            await notifications.notify(
+                db,
+                user_id=vendor_id,
+                type=NotificationType.ORDER_PLACED,
+                message=f"New order {order.order_number} from {client.full_name}.",
+                payload={"order_id": order.id, "order_number": order.order_number},
+            )
 
     await db.flush()
     return await get_order(db, client, order.id)
@@ -345,6 +359,24 @@ async def list_vendor_items(
     count_stmt = (
         select(func.count()).select_from(OrderItem).where(OrderItem.vendor_id == vendor.id)
     )
+
+    # Unpaid orders are invisible to the vendor while online payment is on.
+    #
+    # Without this a vendor can see, confirm and mark ready a line nobody has
+    # paid for - committing stock and effort against an abandoned checkout.
+    # Correlated on OrderItem rather than Order so the same clause works for
+    # the count query, which does not join Order.
+    if settings.payments_enabled:
+        is_paid = (
+            select(Payment.id)
+            .where(
+                Payment.order_id == OrderItem.order_id,
+                Payment.status == PaymentStatus.SUCCESS,
+            )
+            .exists()
+        )
+        stmt = stmt.where(is_paid)
+        count_stmt = count_stmt.where(is_paid)
 
     if status is not None:
         stmt = stmt.where(OrderItem.vendor_status == status)
@@ -451,6 +483,20 @@ async def cancel_order(db: AsyncSession, client: User, order_id: int) -> Order:
         raise ConflictError(
             f"A {order.status.value.lower()} order cannot be cancelled.",
             code="invalid_transition",
+        )
+
+    # A paid order cannot be self-service cancelled.
+    #
+    # Cancelling restocks every line and tells the vendors it is off, while the
+    # money stays with the merchant and nothing in the system records that a
+    # refund is owed. Buyer-initiated cancellation is only safe while no
+    # payment has succeeded; after that it needs a refund, which is out of
+    # scope here and must be handled through Paystack.
+    if any(payment.status == PaymentStatus.SUCCESS for payment in order.payments):
+        raise ConflictError(
+            "This order has been paid and cannot be cancelled here. "
+            "Contact support to arrange a refund.",
+            code="paid_order",
         )
 
     for item in order.items:

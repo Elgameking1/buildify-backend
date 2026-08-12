@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+from app.core.enums import PaymentStatus
 from app.modules.catalog.models import Product
 from app.modules.media.r2 import public_url
 from app.modules.orders.models import Cart, Order, OrderItem
@@ -85,7 +86,23 @@ def serialise_order_item(item: OrderItem) -> OrderItemRead:
     )
 
 
+def _effective_payment(order: Order):
+    """The attempt that decides whether the order reads as paid.
+
+    A success outranks any number of abandoned attempts before it; with no
+    success, the most recent attempt is the one worth showing.
+    """
+    payments = getattr(order, "payments", None) or []
+    if not payments:
+        return None
+    for payment in payments:
+        if payment.status == PaymentStatus.SUCCESS:
+            return payment
+    return max(payments, key=lambda p: p.id)
+
+
 def serialise_order(order: Order) -> OrderRead:
+    payment = _effective_payment(order)
     return OrderRead(
         id=order.id,
         order_number=order.order_number,
@@ -96,6 +113,8 @@ def serialise_order(order: Order) -> OrderRead:
         notes=order.notes,
         placed_at=order.placed_at,
         items=[serialise_order_item(item) for item in sorted(order.items, key=lambda i: i.id)],
+        payment_status=payment.status if payment else None,
+        payment_reference=payment.reference if payment else None,
     )
 
 

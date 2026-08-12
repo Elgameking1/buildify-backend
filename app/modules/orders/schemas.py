@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.core.enums import OrderStatus, ProductUnit, VendorItemStatus
+from app.core.enums import OrderStatus, PaymentStatus, ProductUnit, VendorItemStatus
 
 
 class CartProductSummary(BaseModel):
@@ -71,6 +71,11 @@ class OrderRead(BaseModel):
     notes: str | None = None
     placed_at: datetime
     items: list[OrderItemRead]
+    # Null when no payment has been attempted. Kept separate from `status`,
+    # which tracks vendor fulfilment - an order can be paid and unfulfilled, or
+    # confirmed by a vendor with an abandoned payment behind it.
+    payment_status: PaymentStatus | None = None
+    payment_reference: str | None = None
 
 
 class VendorOrderItemRead(BaseModel):

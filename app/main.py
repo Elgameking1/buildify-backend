@@ -26,6 +26,7 @@ from app.modules.jobs.router import router as jobs_router
 from app.modules.media.router import router as media_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.orders.router import router as orders_router
+from app.modules.payments.router import router as payments_router
 from app.modules.reviews.router import router as reviews_router
 from app.modules.users.router import router as users_router
 from app.modules.workers.router import router as workers_router
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
         users_router,
         catalog_router,
         orders_router,
+        payments_router,
         workers_router,
         jobs_router,
         reviews_router,

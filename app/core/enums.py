@@ -79,6 +79,32 @@ class MediaPurpose(StrEnum):
     LOGO = "logo"
 
 
+class PaymentStatus(StrEnum):
+    """Lifecycle of one attempt to pay for an order.
+
+    Deliberately separate from `OrderStatus`, which `_roll_up_status` derives
+    from the vendor lines. An order can be paid and still awaiting fulfilment,
+    or confirmed by a vendor while a payment attempt is abandoned; collapsing
+    the two would make both unreadable.
+    """
+
+    PENDING = "PENDING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    ABANDONED = "ABANDONED"
+
+
+class PaymentChannel(StrEnum):
+    """The channels offered at Paystack's checkout.
+
+    Values are lowercase because they are sent to Paystack verbatim as the
+    `channels` array, and echoed back on the transaction.
+    """
+
+    CARD = "card"
+    MOBILE_MONEY = "mobile_money"
+
+
 class NotificationType(StrEnum):
     JOB_REQUEST_RECEIVED = "JOB_REQUEST_RECEIVED"
     JOB_ACCEPTED = "JOB_ACCEPTED"
@@ -89,3 +115,5 @@ class NotificationType(StrEnum):
     ORDER_PLACED = "ORDER_PLACED"
     ORDER_ITEM_UPDATED = "ORDER_ITEM_UPDATED"
     REVIEW_RECEIVED = "REVIEW_RECEIVED"
+    PAYMENT_RECEIVED = "PAYMENT_RECEIVED"
+    PAYMENT_FAILED = "PAYMENT_FAILED"

@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     rate_limit_login: str = "20/minute"
     rate_limit_register: str = "10/hour"
     rate_limit_refresh: str = "60/minute"
+    # Each call creates a payment row and an outbound Paystack request, so
+    # an unthrottled retry loop costs both database rows and API quota.
+    rate_limit_payment_init: str = "20/hour"
     # Trust X-Forwarded-For only when actually behind a proxy that rewrites it.
     #
     # Left unset this follows the environment (see `trust_proxy`): on in
@@ -96,6 +99,22 @@ class Settings(BaseSettings):
     # Kept as a plain string because pydantic-settings would otherwise try to
     # JSON-decode a list field and fail on "a,b" input.
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
+
+    # --- Paystack ---------------------------------------------------------
+    # Secret key stays server-side and signs both the API calls and the
+    # webhook digest.  The public key is safe to expose but is not used here:
+    # the flow redirects to Paystack's hosted page rather than mounting their
+    # inline script, which `script-src 'self'` would block.
+    paystack_secret_key: str = ""
+    paystack_public_key: str = ""
+    paystack_base_url: str = "https://api.paystack.co"
+    payment_currency: str = "GHS"
+
+    # Where Paystack sends the browser after checkout.  A *frontend* route, not
+    # an API one - the page there calls back in to verify.  Falls back to the
+    # first CORS origin so a correctly configured deployment needs no extra
+    # setting.
+    paystack_callback_url: str = ""
 
     # --- Cloudflare R2 ----------------------------------------------------
     r2_account_id: str = ""
@@ -173,6 +192,18 @@ class Settings(BaseSettings):
             f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}?charset=utf8mb4"
         )
+
+    @property
+    def payments_enabled(self) -> bool:
+        return bool(self.paystack_secret_key)
+
+    @property
+    def payment_return_url(self) -> str:
+        """Frontend URL Paystack returns the browser to after checkout."""
+        if self.paystack_callback_url:
+            return self.paystack_callback_url.rstrip("/")
+        origins = self.cors_origin_list
+        return f"{origins[0].rstrip('/')}/payment/callback" if origins else ""
 
     @property
     def db_connect_args(self) -> dict:
