@@ -8,6 +8,7 @@ safe to run before every demo.
 
 import asyncio
 import logging
+import os
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -30,7 +31,11 @@ from app.modules.workers.models import Skill, WorkerProfile, WorkerSkill
 
 logger = logging.getLogger("seed")
 
-DEMO_PASSWORD = "DemoPass!2026"
+# Overridable because this file is committed: seeding a publicly reachable
+# deployment with the literal below hands out a working ADMIN login to anyone
+# who has read the repository.  Set SEED_PASSWORD when seeding anything that is
+# not a throwaway local database.
+DEMO_PASSWORD = os.getenv("SEED_PASSWORD", "DemoPass!2026")
 
 CATEGORIES: list[tuple[str, list[str]]] = [
     ("Cement & Concrete", ["Bagged Cement", "Ready-Mix Concrete", "Concrete Blocks"]),
