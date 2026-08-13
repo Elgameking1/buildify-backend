@@ -436,3 +436,56 @@ async def test_paying_releases_the_order_to_the_vendor(
     )
     kinds = [n["type"] for n in notes.json()["items"]]
     assert "PAYMENT_RECEIVED" in kinds
+
+
+# --- Operator messages must not reach the customer -------------------------
+
+
+async def test_gateway_messages_are_never_shown_to_the_customer(
+    client, session_factory, monkeypatch
+):
+    """Paystack's text describes our integration, not the payer's problem.
+
+    "Invalid key" tells someone trying to buy cement nothing they can act on,
+    and tells anyone probing the checkout how the gateway is misconfigured.
+    """
+    world, order, _ = await _order_and_payment(client, session_factory, monkeypatch)
+
+    async def rejected(**kwargs):
+        raise paystack.PaystackError()
+
+    monkeypatch.setattr(paystack, "initialize_transaction", rejected)
+
+    response = await client.post(
+        f"{API}/payments/orders/{order['id']}/initialize",
+        json={},
+        headers=auth(world["buyer"]["access_token"]),
+    )
+
+    body = response.json()
+    assert response.status_code == 409
+    assert body["detail"] == paystack.GENERIC_FAILURE
+    for leak in ("key", "sk_", "pk_", "paystack", "merchant", "api"):
+        assert leak not in body["detail"].lower(), f"{leak!r} leaked to the customer"
+
+
+def test_a_public_key_does_not_enable_payments(monkeypatch):
+    """The commonest misconfiguration, caught before checkout rather than at it."""
+    monkeypatch.setattr(settings, "paystack_secret_key", "pk_test_abc123", raising=False)
+    assert settings.payments_enabled is False
+
+    monkeypatch.setattr(settings, "paystack_secret_key", "sk_test_abc123", raising=False)
+    assert settings.payments_enabled is True
+
+
+def test_whitespace_around_the_key_is_tolerated(monkeypatch):
+    """Pasting into a hosting dashboard routinely appends a newline.
+
+    Left in, it travels into the Authorization header and every call fails
+    with a 401 that reads as "Invalid key" - an invisible cause.
+    """
+    monkeypatch.setattr(
+        settings, "paystack_secret_key", "  sk_test_abc123\n", raising=False
+    )
+    assert settings.payments_enabled is True
+    assert settings.paystack_secret_key_clean == "sk_test_abc123"

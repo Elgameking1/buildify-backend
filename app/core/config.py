@@ -202,8 +202,28 @@ class Settings(BaseSettings):
         )
 
     @property
+    def paystack_secret_key_clean(self) -> str:
+        """The key with surrounding whitespace removed.
+
+        Pasting into a hosting dashboard routinely picks up a trailing space or
+        newline, which survives into the Authorization header and makes every
+        call fail with a 401 that reads as "Invalid key" - a confusing symptom
+        for an invisible cause.
+        """
+        return self.paystack_secret_key.strip()
+
+    @property
     def payments_enabled(self) -> bool:
-        return bool(self.paystack_secret_key)
+        """Whether checkout should offer online payment.
+
+        The key must also *look* like a secret key. The single most common
+        misconfiguration is the public key (pk_...) pasted into this setting:
+        Paystack then rejects every call, and the customer meets it at the
+        worst possible moment - after filling in their delivery details. Better
+        to keep the pay button hidden and log why.
+        """
+        key = self.paystack_secret_key_clean
+        return bool(key) and key.startswith("sk_")
 
     @property
     def payment_return_url(self) -> str:
