@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.enums import UserRole
-from app.core.errors import AuthenticationError, ConflictError, PermissionDeniedError
+from app.core.errors import (
+    AuthenticationError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.security import (
     create_access_token,
     create_password_reset_token,
@@ -174,25 +179,33 @@ async def logout(db: AsyncSession, raw_token: str) -> None:
 # --- Password reset --------------------------------------------------------
 
 
-async def request_password_reset(db: AsyncSession, email: str) -> str | None:
-    """Issue a reset token for `email`, if such an account exists.
+async def verify_email_for_reset(db: AsyncSession, email: str) -> str:
+    """Confirm an account exists for `email` and open a reset window for it.
 
-    Returns the raw token when the deployment is configured to hand it back
-    directly (see `password_reset_return_link`), otherwise None. The *caller*
-    must respond identically either way: this function deliberately does not
-    raise for an unknown address, because a distinguishable response would turn
-    the form into an account-enumeration oracle - which is precisely what the
-    login endpoint above goes to lengths to avoid being.
+    This flow was specified as: enter an email, be told whether it is
+    registered, then set a new password - no emailed link, no one-time code.
+    That means the endpoint confirms whether an address has an account, and
+    that anyone who reaches this step can set that account's password. Both
+    follow from the design rather than from the implementation, and the
+    trade-off is the product owner's call.
 
-    Any previous unused token for the account is invalidated first, so a reset
-    requested twice leaves exactly one working link rather than several.
+    What the implementation still does is bound the damage:
+
+      * a short-lived, single-use token ties step two to a completed step one,
+        so the password cannot be set by a request that skipped the lookup;
+      * only its SHA-256 digest is stored, so the window is not readable from
+        a database dump;
+      * any earlier unused token is invalidated, leaving exactly one open
+        window per account;
+      * completing the reset revokes every existing session (see below).
+
+    Raises NotFoundError when no active account matches, which is what the UI
+    needs in order to say so.
     """
     user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
 
     if user is None or not user.is_active:
-        # No token, no row, no timing shortcut worth caring about here: the
-        # response is identical and nothing downstream branches on this.
-        return None
+        raise NotFoundError("No account was found for that email address.")
 
     now = utc_now()
     outstanding = await db.execute(
@@ -207,23 +220,12 @@ async def request_password_reset(db: AsyncSession, email: str) -> str | None:
 
     raw_token, token_hash, expires_at = create_password_reset_token()
     db.add(
-        PasswordResetToken(
-            user_id=user.id, token_hash=token_hash, expires_at=expires_at
-        )
+        PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires_at)
     )
     await db.flush()
 
-    if settings.password_reset_return_link:
-        return raw_token
-
-    # No mail provider is configured, so the link is logged rather than sent.
-    # It is the operator's copy - it never reaches the HTTP response.
-    logger.warning(
-        "Password reset requested for user %s. Token (deliver out of band): %s",
-        user.id,
-        raw_token,
-    )
-    return None
+    logger.warning("Password reset window opened for user %s", user.id)
+    return raw_token
 
 
 async def reset_password(db: AsyncSession, raw_token: str, new_password: str) -> None:

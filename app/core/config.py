@@ -63,18 +63,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
-    # A reset link is a bearer credential for the account and travels through
-    # email, so it is deliberately short-lived.
-    password_reset_expire_minutes: int = 30
-
-    # Return the reset link in the API response instead of relying on email.
-    #
-    # OFF by default, and it must stay off anywhere real: with it on, anyone
-    # who can name an existing email address is handed a working reset link for
-    # that account, which is account takeover with extra steps. It exists
-    # because this deployment has no mail provider, and a demo that cannot
-    # complete the flow is worse than one that documents the trade-off.
-    password_reset_return_link: bool = False
+    # How long the reset window stays open after the email is confirmed.
+    # Short, because it only has to cover typing a password twice.
+    password_reset_expire_minutes: int = 10
 
     # Largest request body accepted, before it reaches a route handler.  Guards
     # against a single huge JSON body tying up CPU (Argon2 hashing a multi-MB

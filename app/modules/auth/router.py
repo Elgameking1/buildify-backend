@@ -6,12 +6,12 @@ from app.core.rate_limit import limiter
 from app.modules.auth import service
 from app.modules.auth.schemas import (
     AuthResponse,
-    ForgotPasswordRequest,
-    ForgotPasswordResponse,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -53,26 +53,21 @@ async def logout(payload: RefreshRequest, db: DbDep) -> None:
     await service.logout(db, payload.refresh_token)
 
 
-@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+@router.post("/verify-email", response_model=VerifyEmailResponse)
 @limiter.limit(settings.rate_limit_forgot_password)
-async def forgot_password(
-    request: Request, response: Response, payload: ForgotPasswordRequest, db: DbDep
-) -> ForgotPasswordResponse:
-    """Start a password reset.
+async def verify_email(
+    request: Request, response: Response, payload: VerifyEmailRequest, db: DbDep
+) -> VerifyEmailResponse:
+    """Step one of the reset: confirm the address belongs to an account.
 
-    Answers identically whether or not the address is registered. Confirming
-    it would make this a free account-enumeration endpoint - the same reason
-    login returns one message for a bad email and a bad password.
-
-    Rate limited hard: without a limit the uniform response is still an oracle,
-    because an attacker can grind addresses and read the *timing* or simply
-    exhaust the mail budget.
+    404 when it does not, which is what lets the form say so. That makes this
+    endpoint able to answer "is this person registered here" - accepted as part
+    of the specified flow - so the rate limit is the control that stops it
+    being usable to sweep a list of addresses.
     """
-    token = await service.request_password_reset(db, payload.email)
-    return ForgotPasswordResponse(
-        detail=(
-            "If that email address has an account, a password reset link is on its way."
-        ),
+    token = await service.verify_email_for_reset(db, payload.email)
+    return VerifyEmailResponse(
+        detail="Account found. You can now set a new password.",
         reset_token=token,
     )
 

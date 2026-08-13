@@ -53,19 +53,19 @@ class AuthResponse(TokenPair):
     user: UserRead
 
 
-class ForgotPasswordRequest(BaseModel):
+class VerifyEmailRequest(BaseModel):
     email: EmailStr
 
 
-class ForgotPasswordResponse(BaseModel):
-    """Deliberately says nothing about whether the account exists.
+class VerifyEmailResponse(BaseModel):
+    """Opens the reset window for a confirmed account.
 
-    `reset_token` is populated only when the deployment is configured to hand
-    the link back directly, which is a demo convenience and off by default.
+    `reset_token` ties the password step to this lookup and expires quickly.
+    It is short-lived and single-use, so it is not a credential worth storing.
     """
 
     detail: str
-    reset_token: str | None = None
+    reset_token: str
 
 
 class ResetPasswordRequest(BaseModel):
