@@ -67,6 +67,29 @@ class RefreshToken(PKMixin, TimestampMixin, Base):
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
 
 
+class PasswordResetToken(PKMixin, TimestampMixin, Base):
+    """A single password-reset grant.
+
+    Same shape as RefreshToken and for the same reason: only the SHA-256
+    digest is stored, so a database leak yields no usable reset links.
+
+    `used_at` makes the token single-use. Without it a link sitting in an
+    inbox - or in a mail provider's logs - stays a working key to the account
+    for as long as it has not expired.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship()
+
+
 class VendorProfile(TimestampMixin, Base):
     """Business details for a VENDOR account.  Keyed by the user id itself."""
 

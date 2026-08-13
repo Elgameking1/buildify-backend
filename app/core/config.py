@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
+    # A reset link is a bearer credential for the account and travels through
+    # email, so it is deliberately short-lived.
+    password_reset_expire_minutes: int = 30
+
+    # Return the reset link in the API response instead of relying on email.
+    #
+    # OFF by default, and it must stay off anywhere real: with it on, anyone
+    # who can name an existing email address is handed a working reset link for
+    # that account, which is account takeover with extra steps. It exists
+    # because this deployment has no mail provider, and a demo that cannot
+    # complete the flow is worse than one that documents the trade-off.
+    password_reset_return_link: bool = False
+
     # Largest request body accepted, before it reaches a route handler.  Guards
     # against a single huge JSON body tying up CPU (Argon2 hashing a multi-MB
     # "password", for instance).
@@ -79,6 +92,10 @@ class Settings(BaseSettings):
     # Each call creates a payment row and an outbound Paystack request, so
     # an unthrottled retry loop costs both database rows and API quota.
     rate_limit_payment_init: str = "20/hour"
+    # Tight: the uniform response is only non-enumerable if an attacker
+    # cannot grind addresses through it.
+    rate_limit_forgot_password: str = "5/hour"
+    rate_limit_reset_password: str = "10/hour"
     # Trust X-Forwarded-For only when actually behind a proxy that rewrites it.
     #
     # Left unset this follows the environment (see `trust_proxy`): on in

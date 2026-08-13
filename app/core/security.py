@@ -154,3 +154,23 @@ def create_refresh_token() -> tuple[str, str, datetime]:
 
 def hash_refresh_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+# --- Password reset tokens -------------------------------------------------
+
+
+def create_password_reset_token() -> tuple[str, str, datetime]:
+    """Return `(raw_token, token_hash, expires_at)`.
+
+    Short-lived by design: a reset link is a bearer credential for the account,
+    and it travels through email, which is not a confidential channel.
+    """
+    raw_token = secrets.token_urlsafe(48)
+    expires_at = datetime.now(UTC) + timedelta(
+        minutes=settings.password_reset_expire_minutes
+    )
+    return raw_token, hash_password_reset_token(raw_token), expires_at
+
+
+def hash_password_reset_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()

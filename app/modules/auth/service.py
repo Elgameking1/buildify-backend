@@ -1,4 +1,6 @@
-"""Registration, login, token rotation and logout."""
+"""Registration, login, token rotation, logout and password reset."""
+
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,8 +10,10 @@ from app.core.enums import UserRole
 from app.core.errors import AuthenticationError, ConflictError, PermissionDeniedError
 from app.core.security import (
     create_access_token,
+    create_password_reset_token,
     create_refresh_token,
     hash_password,
+    hash_password_reset_token,
     hash_refresh_token,
     needs_rehash,
     validate_password_strength,
@@ -17,9 +21,16 @@ from app.core.security import (
 )
 from app.db.base import utc_now
 from app.modules.auth.schemas import AuthResponse, RegisterRequest
-from app.modules.users.models import RefreshToken, User, VendorProfile
+from app.modules.users.models import (
+    PasswordResetToken,
+    RefreshToken,
+    User,
+    VendorProfile,
+)
 from app.modules.users.schemas import UserRead
 from app.modules.workers.models import WorkerProfile
+
+logger = logging.getLogger(__name__)
 
 
 async def _issue_tokens(db: AsyncSession, user: User) -> AuthResponse:
@@ -158,3 +169,101 @@ async def logout(db: AsyncSession, raw_token: str) -> None:
     if token is not None and token.revoked_at is None:
         token.revoked_at = utc_now()
         await db.flush()
+
+
+# --- Password reset --------------------------------------------------------
+
+
+async def request_password_reset(db: AsyncSession, email: str) -> str | None:
+    """Issue a reset token for `email`, if such an account exists.
+
+    Returns the raw token when the deployment is configured to hand it back
+    directly (see `password_reset_return_link`), otherwise None. The *caller*
+    must respond identically either way: this function deliberately does not
+    raise for an unknown address, because a distinguishable response would turn
+    the form into an account-enumeration oracle - which is precisely what the
+    login endpoint above goes to lengths to avoid being.
+
+    Any previous unused token for the account is invalidated first, so a reset
+    requested twice leaves exactly one working link rather than several.
+    """
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        # No token, no row, no timing shortcut worth caring about here: the
+        # response is identical and nothing downstream branches on this.
+        return None
+
+    now = utc_now()
+    outstanding = await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at > now,
+        )
+    )
+    for token in outstanding.scalars().all():
+        token.used_at = now
+
+    raw_token, token_hash, expires_at = create_password_reset_token()
+    db.add(
+        PasswordResetToken(
+            user_id=user.id, token_hash=token_hash, expires_at=expires_at
+        )
+    )
+    await db.flush()
+
+    if settings.password_reset_return_link:
+        return raw_token
+
+    # No mail provider is configured, so the link is logged rather than sent.
+    # It is the operator's copy - it never reaches the HTTP response.
+    logger.warning(
+        "Password reset requested for user %s. Token (deliver out of band): %s",
+        user.id,
+        raw_token,
+    )
+    return None
+
+
+async def reset_password(db: AsyncSession, raw_token: str, new_password: str) -> None:
+    """Consume a reset token and set a new password.
+
+    Every existing session is revoked as part of this. A password reset is the
+    action someone takes when they believe their account is compromised, and
+    leaving the attacker's refresh token alive would make it ceremonial.
+    """
+    token_hash = hash_password_reset_token(raw_token)
+    token = (
+        await db.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+        )
+    ).scalar_one_or_none()
+
+    now = utc_now()
+    # One message for expired, already-used and never-existed. Distinguishing
+    # them tells a holder of a stale link whether the account exists.
+    if token is None or token.used_at is not None or token.expires_at <= now:
+        raise AuthenticationError(
+            "This reset link is invalid or has expired.", code="reset_invalid"
+        )
+
+    user = await db.get(User, token.user_id)
+    if user is None or not user.is_active:
+        raise AuthenticationError(
+            "This reset link is invalid or has expired.", code="reset_invalid"
+        )
+
+    validate_password_strength(new_password)
+    user.password_hash = hash_password(new_password)
+    token.used_at = now
+
+    revoked = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)
+        )
+    )
+    for session in revoked.scalars().all():
+        session.revoked_at = now
+
+    await db.flush()

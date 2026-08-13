@@ -51,3 +51,25 @@ class TokenPair(BaseModel):
 
 class AuthResponse(TokenPair):
     user: UserRead
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Deliberately says nothing about whether the account exists.
+
+    `reset_token` is populated only when the deployment is configured to hand
+    the link back directly, which is a demo convenience and off by default.
+    """
+
+    detail: str
+    reset_token: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+    # Same bounds as registration: long enough to be worth having, capped so a
+    # multi-megabyte value cannot be fed to Argon2.
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
